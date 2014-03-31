@@ -15,26 +15,32 @@
  */
 
 package com.imbryk.viewPager;
-
 import android.content.Context;
+import android.graphics.Rect;
 import android.support.v4.view.PagerAdapter;
 import android.support.v4.view.ViewPager;
 import android.util.AttributeSet;
+import android.util.Log;
+import android.view.FocusFinder;
+import android.view.SoundEffectConstants;
+import android.view.View;
+import android.view.ViewGroup;
+import android.view.ViewParent;
 
 /**
  * A ViewPager subclass enabling infinte scrolling of the viewPager elements
- * 
+ * <p/>
  * When used for paginating views (in opposite to fragments), no code changes
  * should be needed only change xml's from <android.support.v4.view.ViewPager>
  * to <com.imbryk.viewPager.LoopViewPager>
- * 
+ * <p/>
  * If "blinking" can be seen when paginating to first or last view, simply call
  * seBoundaryCaching( true ), or change DEFAULT_BOUNDARY_CASHING to true
- * 
+ * <p/>
  * When using a FragmentPagerAdapter or FragmentStatePagerAdapter,
- * additional changes in the adapter must be done. 
+ * additional changes in the adapter must be done.
  * The adapter must be prepared to create 2 extra items e.g.:
- * 
+ * <p/>
  * The original adapter creates 4 items: [0,1,2,3]
  * The modified adapter will have to create 6 items [0,1,2,3,4,5]
  * with mapping realPosition=(position-1)%count
@@ -42,34 +48,36 @@ import android.util.AttributeSet;
  */
 public class LoopViewPager extends ViewPager {
 
+    private static final String TAG = LoopViewPager.class.getSimpleName();
     private static final boolean DEFAULT_BOUNDARY_CASHING = false;
 
     OnPageChangeListener mOuterPageChangeListener;
     private LoopPagerAdapterWrapper mAdapter;
     private boolean mBoundaryCaching = DEFAULT_BOUNDARY_CASHING;
-    
-    
+    private final Rect mTempRect = new Rect();
+
+
     /**
      * helper function which may be used when implementing FragmentPagerAdapter
-     *   
+     *
      * @param position
      * @param count
      * @return (position-1)%count
      */
-    public static int toRealPosition( int position, int count ){
-        position = position-1;
-        if( position < 0 ){
+    public static int toRealPosition(int position, int count) {
+        position = position - 1;
+        if (position < 0) {
             position += count;
-        }else{
-            position = position%count;
+        } else {
+            position = position % count;
         }
         return position;
     }
-    
+
     /**
      * If set to true, the boundary views (i.e. first and last) will never be destroyed
-     * This may help to prevent "blinking" of some views 
-     * 
+     * This may help to prevent "blinking" of some views
+     *
      * @param flag
      */
     public void setBoundaryCaching(boolean flag) {
@@ -97,6 +105,7 @@ public class LoopViewPager extends ViewPager {
         return mAdapter != null ? mAdapter.toRealPosition(super.getCurrentItem()) : 0;
     }
 
+    @Override
     public void setCurrentItem(int item, boolean smoothScroll) {
         int realItem = mAdapter.toInnerPosition(item);
         super.setCurrentItem(realItem, smoothScroll);
@@ -109,10 +118,145 @@ public class LoopViewPager extends ViewPager {
         }
     }
 
+    /**
+     * Since this is a looping pager we always want to decrease with 1
+     * when we scroll left. We return true here to support the
+     * arrowScroll implementation.
+     *
+     * @return true always
+     */
+    private boolean pageLeft() {
+        setCurrentItem(getCurrentItem()-1, true);
+        return true;
+    }
+
+    /**
+     * Since this is a looping pager we always want to increase with
+     * 1 when we scroll right. We return true here to support the
+     * arrowScroll implementation.
+     *
+     * @return true always
+     */
+    private boolean pageRight() {
+        setCurrentItem(getCurrentItem()+1, true);
+        return true;
+    }
+
+    /**
+     * Since pageLeft() and pageRight can't be overridden from the superclass
+     * we override arrowScroll() instead and call our own implementations of
+     * pageLeft() and pageRight().
+     *
+     * AOSP source: https://android.googlesource.com/platform/frameworks/support/+/master/v4/java/android/support/v4/view/ViewPager.java
+     *
+     * @param direction the direction to scroll in
+     * @return true if successful
+     */
+    @Override
+    public boolean arrowScroll(int direction) {
+        View currentFocused = findFocus();
+        if (currentFocused == this) {
+            currentFocused = null;
+        } else if (currentFocused != null) {
+            boolean isChild = false;
+            for (ViewParent parent = currentFocused.getParent(); parent instanceof ViewGroup;
+                 parent = parent.getParent()) {
+                if (parent == this) {
+                    isChild = true;
+                    break;
+                }
+            }
+            if (!isChild) {
+                // This would cause the focus search down below to fail in fun ways.
+                final StringBuilder sb = new StringBuilder();
+                sb.append(currentFocused.getClass().getSimpleName());
+                for (ViewParent parent = currentFocused.getParent(); parent instanceof ViewGroup;
+                     parent = parent.getParent()) {
+                    sb.append(" => ").append(parent.getClass().getSimpleName());
+                }
+                Log.e(TAG, "arrowScroll tried to find focus based on non-child " +
+                        "current focused view " + sb.toString());
+                currentFocused = null;
+            }
+        }
+
+        boolean handled = false;
+
+        View nextFocused = FocusFinder.getInstance().findNextFocus(this, currentFocused, direction);
+        if (nextFocused != null && nextFocused != currentFocused) {
+            if (direction == View.FOCUS_LEFT) {
+                // If there is nothing to the left, or this is causing us to
+                // jump to the right, then what we really want to do is page left.
+                final int nextLeft = getChildRectInPagerCoordinates(mTempRect, nextFocused).left;
+                final int currLeft = getChildRectInPagerCoordinates(mTempRect, currentFocused).left;
+                if (currentFocused != null && nextLeft >= currLeft) {
+                    handled = pageLeft();
+                } else {
+                    handled = nextFocused.requestFocus();
+                }
+            } else if (direction == View.FOCUS_RIGHT) {
+                // If there is nothing to the right, or this is causing us to
+                // jump to the left, then what we really want to do is page right.
+                final int nextLeft = getChildRectInPagerCoordinates(mTempRect, nextFocused).left;
+                final int currLeft = getChildRectInPagerCoordinates(mTempRect, currentFocused).left;
+                if (currentFocused != null && nextLeft <= currLeft) {
+                    handled = pageRight();
+                } else {
+                    handled = nextFocused.requestFocus();
+                }
+            }
+        } else if (direction == FOCUS_LEFT || direction == FOCUS_BACKWARD) {
+            // Trying to move left and nothing there; try to page.
+            handled = pageLeft();
+        } else if (direction == FOCUS_RIGHT || direction == FOCUS_FORWARD) {
+            // Trying to move right and nothing there; try to page.
+            handled = pageRight();
+        }
+        if (handled) {
+            playSoundEffect(SoundEffectConstants.getContantForFocusDirection(direction));
+        }
+        return handled;
+    }
+
+    /**
+     * Taken from AOSP source to support the arrowScroll() method. No changes have been made to it.
+     *
+     * AOSP source: https://android.googlesource.com/platform/frameworks/support/+/master/v4/java/android/support/v4/view/ViewPager.java
+     *
+     * @param outRect the rect
+     * @param child the child
+     * @return the child rect
+     */
+    private Rect getChildRectInPagerCoordinates(Rect outRect, View child) {
+        if (outRect == null) {
+            outRect = new Rect();
+        }
+        if (child == null) {
+            outRect.set(0, 0, 0, 0);
+            return outRect;
+        }
+        outRect.left = child.getLeft();
+        outRect.right = child.getRight();
+        outRect.top = child.getTop();
+        outRect.bottom = child.getBottom();
+
+        ViewParent parent = child.getParent();
+        while (parent instanceof ViewGroup && parent != this) {
+            final ViewGroup group = (ViewGroup) parent;
+            outRect.left += group.getLeft();
+            outRect.right += group.getRight();
+            outRect.top += group.getTop();
+            outRect.bottom += group.getBottom();
+
+            parent = group.getParent();
+        }
+        return outRect;
+    }
+
     @Override
     public void setOnPageChangeListener(OnPageChangeListener listener) {
         mOuterPageChangeListener = listener;
-    };
+    }
 
     public LoopViewPager(Context context) {
         super(context);
@@ -134,7 +278,6 @@ public class LoopViewPager extends ViewPager {
 
         @Override
         public void onPageSelected(int position) {
-
             int realPosition = mAdapter.toRealPosition(position);
             if (mPreviousPosition != realPosition) {
                 mPreviousPosition = realPosition;
@@ -146,7 +289,7 @@ public class LoopViewPager extends ViewPager {
 
         @Override
         public void onPageScrolled(int position, float positionOffset,
-                int positionOffsetPixels) {
+                                   int positionOffsetPixels) {
             int realPosition = position;
             if (mAdapter != null) {
                 realPosition = mAdapter.toRealPosition(position);

@@ -22,6 +22,7 @@ import android.support.v4.view.ViewPager;
 import android.util.AttributeSet;
 import android.util.Log;
 import android.view.FocusFinder;
+import android.view.KeyEvent;
 import android.view.SoundEffectConstants;
 import android.view.View;
 import android.view.ViewGroup;
@@ -54,6 +55,7 @@ public class LoopViewPager extends ViewPager {
     OnPageChangeListener mOuterPageChangeListener;
     private LoopPagerAdapterWrapper mAdapter;
     private boolean mBoundaryCaching = DEFAULT_BOUNDARY_CASHING;
+    private boolean mScrolling;
     private final Rect mTempRect = new Rect();
 
 
@@ -107,8 +109,10 @@ public class LoopViewPager extends ViewPager {
 
     @Override
     public void setCurrentItem(int item, boolean smoothScroll) {
-        int realItem = mAdapter.toInnerPosition(item);
-        super.setCurrentItem(realItem, smoothScroll);
+    	if(!mScrolling) {
+    		int realItem = mAdapter.toInnerPosition(item);
+            super.setCurrentItem(realItem, smoothScroll);
+    	}
     }
 
     @Override
@@ -118,28 +122,34 @@ public class LoopViewPager extends ViewPager {
         }
     }
 
-    /**
+	/**
      * Since this is a looping pager we always want to decrease with 1
-     * when we scroll left. We return true here to support the
+     * when we scroll left. We return boolean here to support the
      * arrowScroll implementation.
      *
-     * @return true always
+     * @return true if handled
      */
     private boolean pageLeft() {
-        setCurrentItem(getCurrentItem()-1, true);
-        return true;
+    	if (mAdapter.getCount() > 1) {
+            setCurrentItem(getCurrentItem() - 1, true);
+            return true;
+        }
+    	return false;
     }
 
     /**
      * Since this is a looping pager we always want to increase with
-     * 1 when we scroll right. We return true here to support the
+     * 1 when we scroll right. We return boolean here to support the
      * arrowScroll implementation.
      *
-     * @return true always
+     * @return true if handled
      */
     private boolean pageRight() {
-        setCurrentItem(getCurrentItem()+1, true);
-        return true;
+    	if (mAdapter.getCount() > 1) {
+            setCurrentItem(getCurrentItem() + 1, true);
+            return true;
+        }
+    	return false;
     }
 
     /**
@@ -269,7 +279,7 @@ public class LoopViewPager extends ViewPager {
     }
 
     private void init() {
-        super.setOnPageChangeListener(onPageChangeListener);
+    	super.setOnPageChangeListener(onPageChangeListener);
     }
 
     private OnPageChangeListener onPageChangeListener = new OnPageChangeListener() {
@@ -278,7 +288,7 @@ public class LoopViewPager extends ViewPager {
 
         @Override
         public void onPageSelected(int position) {
-            int realPosition = mAdapter.toRealPosition(position);
+    		int realPosition = mAdapter.toRealPosition(position);
             if (mPreviousPosition != realPosition) {
                 mPreviousPosition = realPosition;
                 if (mOuterPageChangeListener != null) {
@@ -319,6 +329,12 @@ public class LoopViewPager extends ViewPager {
 
         @Override
         public void onPageScrollStateChanged(int state) {
+        	if(state == ViewPager.SCROLL_STATE_IDLE) {
+        		mScrolling = false;
+        	} else if(state == ViewPager.SCROLL_STATE_SETTLING) {
+        		mScrolling = true;
+        	}
+        	
             if (mAdapter != null) {
                 int position = LoopViewPager.super.getCurrentItem();
                 int realPosition = mAdapter.toRealPosition(position);
